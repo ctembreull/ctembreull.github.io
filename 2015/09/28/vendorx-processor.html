@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>The VendorX Ingestion Processor</title>
+  <meta name="description" content="Each machine in the processor swarm, when it was spawned by the supervisor, had an init.d entrywhich would automatically launch the processor daemon, which w...">
+
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="canonical" href="/2015/09/28/vendorx-processor.html">
+  <link rel="alternate" type="application/rss+xml" title="" href="/feed.xml" />
+</head>
+
+
+  <body>
+
+    <header class="site-header">
+
+  <div class="wrapper">
+
+    <a class="site-title" href="/"></a>
+
+    <nav class="site-nav">
+      <a href="#" class="menu-icon">
+        <svg viewBox="0 0 18 15">
+          <path fill="#424242" d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.031C17.335,0,18,0.665,18,1.484L18,1.484z"/>
+          <path fill="#424242" d="M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0c0-0.82,0.665-1.484,1.484-1.484 h15.031C17.335,6.031,18,6.696,18,7.516L18,7.516z"/>
+          <path fill="#424242" d="M18,13.516C18,14.335,17.335,15,16.516,15H1.484C0.665,15,0,14.335,0,13.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.031C17.335,12.031,18,12.696,18,13.516L18,13.516z"/>
+        </svg>
+      </a>
+
+      <div class="trigger">
+        
+          
+          <a class="page-link" href="/about/">What You See Here</a>
+          
+        
+          
+        
+          
+        
+          
+        
+      </div>
+    </nav>
+
+  </div>
+
+</header>
+
+
+    <div class="page-content">
+      <div class="wrapper">
+        <div class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">The VendorX Ingestion Processor</h1>
+    <p class="post-meta">Sep 28, 2015</p>
+  </header>
+
+  <article class="post-content">
+    <p>Each machine in the processor swarm, when it was spawned by the supervisor, had an init.d entry
+which would automatically launch the processor daemon, which was yet another Ruby application
+written with DaemonKit.</p>
+
+<p>This example includes 5 files:</p>
+
+<ul>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/thor-ingest-processor-daemon.rb">thor-ingest-processor-daemon.rb</a>, the working section of the ingestion processor</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/thor-ingest-processor.rb">thor-ingest-processor.rb</a>, the (rather expansive) configuration section for the processor daemon</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/elasticsearch.rb">elasticsearch.rb</a>, a module for indexing documents in Elasticsearch</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/round-geopoints.rb">round-geopoints.rb</a>, a processor module which
+parsed documents, found any examples of geotagging, and rounded them down to 5 digits.</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/datasift.rb">datasift.rb</a>, a module for parsing a document from datasift and allowing easy traversal of the complex JSON format.</li>
+</ul>
+
+<h3 id="sample-1-remote-configuration-via-api">Sample #1: Remote Configuration via API</h3>
+
+<p>The processor daemon, on startup, makes a call to the <a href="/2015/09/28/vendorx-api.html">API</a>
+for a configuration object. This let us manage all configuration in one place, and broadcast it as needed.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="n">api_config</span> <span class="o">=</span> <span class="no">YAML</span><span class="o">.</span><span class="n">load_file</span><span class="p">(</span><span class="no">File</span><span class="o">.</span><span class="n">expand_path</span><span class="p">(</span><span class="s1">&#39;../../config/thor_api.yml&#39;</span><span class="p">,</span> <span class="bp">__FILE__</span><span class="p">))</span>
+<span class="n">response</span> <span class="o">=</span> <span class="no">Faraday</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">#{</span><span class="n">api_config</span><span class="o">[</span><span class="s1">&#39;host&#39;</span><span class="o">]</span><span class="si">}#{</span><span class="n">api_config</span><span class="o">[</span><span class="s1">&#39;uri&#39;</span><span class="o">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="no">DaemonKit</span><span class="o">.</span><span class="n">arguments</span><span class="o">.</span><span class="n">options</span><span class="o">[</span><span class="ss">:app_config</span><span class="o">]</span> <span class="o">=</span> <span class="no">JSON</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">body</span><span class="p">)</span></code></pre></div>
+
+<p>The response to the configuration request takes the form of a JSON object which tells the ingestion processors
+what to do with any given document. This allows us to change configurations on the fly and have all future
+documents be processed according to the new rules.</p>
+
+<div class="highlight"><pre><code class="language-json" data-lang="json"><span class="err">//</span> <span class="err">This</span> <span class="err">is</span> <span class="err">an</span> <span class="err">example</span> <span class="err">of</span> <span class="err">the</span> <span class="err">JSON</span> <span class="err">response</span> <span class="err">from</span> <span class="err">the</span> <span class="err">configuration</span> <span class="err">call.</span>
+<span class="p">{</span>
+  <span class="nt">&quot;provider&quot;</span><span class="p">:</span> <span class="s2">&quot;datasift&quot;</span><span class="p">,</span>
+  <span class="nt">&quot;notifier&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;flowdock&quot;</span><span class="p">],</span>
+  <span class="nt">&quot;queue&quot;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;redis&quot;</span><span class="p">,</span>
+    <span class="nt">&quot;db&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="nt">&quot;queue&quot;</span><span class="p">:</span> <span class="s2">&quot;interactions&quot;</span><span class="p">,</span>
+    <span class="nt">&quot;pull&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+    <span class="nt">&quot;sleep&quot;</span><span class="p">:</span> <span class="mi">15</span><span class="p">,</span>
+  <span class="p">},</span>
+  <span class="nt">&quot;storage&quot;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;elasticsearch&quot;</span><span class="p">,</span>
+    <span class="nt">&quot;index&quot;</span><span class="p">:</span> <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="nt">&quot;types&quot;</span><span class="p">:</span> <span class="p">{</span>
+      <span class="nt">&quot;document&quot;</span><span class="p">:</span> <span class="s2">&quot;tweet&quot;</span><span class="p">,</span>
+      <span class="nt">&quot;author&quot;</span><span class="p">:</span> <span class="s2">&quot;author&quot;</span>
+    <span class="p">}</span>
+  <span class="p">},</span>
+  <span class="nt">&quot;graph&quot;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;neo4j&quot;</span>
+  <span class="p">},</span>
+  <span class="nt">&quot;transform&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;IdToInt&quot;</span><span class="p">,</span> <span class="s2">&quot;AmericanizeKeys&quot;</span><span class="p">,</span> <span class="s2">&quot;RoundGeopoints&quot;</span><span class="p">,</span> <span class="s2">&quot;ReplaceTopics&quot;</span><span class="p">],</span>
+<span class="p">}</span></code></pre></div>
+
+<p>This configuration was used to load modules (this is a place where I really wished
+Ruby had interfaces) that provided the methods that would be used when transforming
+the data pulled off the Redis queue. I took these strings and constantized them
+into Ruby objects that were stored as class variables within the daemon itself.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># an excerpt detailing how I took the JSON strings from the configuration object</span>
+<span class="c1"># and turned them into addressable Ruby objects.</span>
+
+<span class="c1"># The formatter is actually a set of defined &quot;hash path&quot; methods which would</span>
+<span class="c1"># let me traverse a deeply-nested JSON hash</span>
+<span class="vi">@formatter</span> <span class="o">=</span> <span class="kp">nil</span>
+<span class="k">unless</span> <span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;provider&#39;</span><span class="o">].</span><span class="n">nil?</span>
+  <span class="k">begin</span>
+    <span class="nb">require</span> <span class="s2">&quot;modules/</span><span class="si">#{</span><span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;provider&#39;</span><span class="o">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="vi">@formatter</span> <span class="o">=</span> <span class="n">constantize</span><span class="p">(</span><span class="s2">&quot;VendorX::Provider::</span><span class="si">#{</span><span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;provider&#39;</span><span class="o">].</span><span class="n">capitalize</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+  <span class="k">rescue</span> <span class="no">LoadError</span> <span class="o">=&gt;</span> <span class="n">e</span>
+    <span class="k">raise</span> <span class="no">VendorX</span><span class="o">::</span><span class="no">Errors</span><span class="o">::</span><span class="no">NotImplementedError</span><span class="p">,</span> <span class="s2">&quot;provider: </span><span class="si">#{</span><span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;provider&#39;</span><span class="o">]</span><span class="si">}</span><span class="s2">&quot;</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c1"># Processors were designed to change the values of the JSON hash, or to add or remove</span>
+<span class="c1"># them to fit with our desired schema. We could pass an array of them and have them</span>
+<span class="c1"># run in sequence.</span>
+<span class="vi">@processors</span> <span class="o">=</span> <span class="o">[]</span>
+<span class="k">unless</span> <span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;transform&#39;</span><span class="o">].</span><span class="n">nil?</span>
+  <span class="n">app_config</span><span class="o">[</span><span class="s1">&#39;transform&#39;</span><span class="o">].</span><span class="n">each</span> <span class="p">{</span> <span class="o">|</span><span class="n">tx</span><span class="o">|</span> <span class="vi">@processors</span> <span class="o">&lt;&lt;</span> <span class="n">constantize</span><span class="p">(</span><span class="n">tx</span><span class="p">)</span> <span class="p">}</span>
+<span class="k">end</span></code></pre></div>
+
+<h3 id="sample-2-the-data-processing-pipeline">Sample #2: The Data Processing Pipeline</h3>
+
+<p>Once the processing daemon is configured, actually getting data from the Redis queue
+and working with it is a simple process.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="n">documents</span> <span class="o">=</span> <span class="vi">@queue</span><span class="o">.</span><span class="n">dequeue</span>
+<span class="n">documents</span><span class="o">.</span><span class="n">each</span> <span class="k">do</span> <span class="o">|</span><span class="n">doc</span><span class="o">|</span>
+  <span class="c1"># Parse the JSON document with the formatter class</span>
+  <span class="n">interaction</span> <span class="o">=</span> <span class="vi">@formatter</span><span class="o">.</span><span class="n">nil?</span> <span class="p">?</span> <span class="n">doc</span> <span class="p">:</span> <span class="vi">@formatter</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span>
+
+  <span class="c1"># Transform the document according to configured rules</span>
+  <span class="vi">@processors</span><span class="o">.</span><span class="n">each</span> <span class="p">{</span> <span class="o">|</span><span class="n">pc</span><span class="o">|</span> <span class="n">interaction</span> <span class="o">=</span> <span class="n">pc</span><span class="o">.</span><span class="n">process</span><span class="p">(</span><span class="n">interaction</span> <span class="p">}</span>
+
+  <span class="c1"># Upload the document to our configured storage engine</span>
+  <span class="k">unless</span> <span class="vi">@storage</span><span class="o">.</span><span class="n">nil?</span>
+    <span class="vi">@storage</span><span class="o">.</span><span class="n">store_document</span><span class="p">(</span><span class="n">interaction</span><span class="p">)</span>
+    <span class="vi">@storage</span><span class="o">.</span><span class="n">store_authors</span><span class="p">(</span><span class="n">interaction</span><span class="p">)</span> <span class="k">unless</span> <span class="no">DaemonKit</span><span class="o">.</span><span class="n">arguments</span><span class="o">.</span><span class="n">options</span><span class="o">[</span><span class="ss">:app_config</span><span class="o">][</span><span class="s1">&#39;storage&#39;</span><span class="o">][</span><span class="s1">&#39;types&#39;</span><span class="o">][</span><span class="s1">&#39;author&#39;</span><span class="o">].</span><span class="n">nil?</span>
+  <span class="k">end</span>
+
+  <span class="c1"># If configured to do so, extract authors and the relationships between them</span>
+  <span class="vi">@graph</span><span class="o">.</span><span class="n">graph_connections</span><span class="p">(</span><span class="n">interaction</span><span class="p">)</span> <span class="k">if</span> <span class="vi">@graph</span><span class="o">.</span><span class="n">present?</span>
+<span class="k">end</span></code></pre></div>
+
+<p>If you remember back to our conversation at the restaurant before, we talked about how
+I would implement an analytics system to track frequency of certain events within the
+datastream itself. This would be an excellent place to do that; using the paradigm
+established in this example, the analytics could be configured at the API level,
+transmitted to the stream processor as JSON, and executed in realtime as each document
+was processed. We also discussed an alternate means of accomplishing the goal - transforming
+each ingested document to contain a subset of its data and then indexing it in Elasticsearch
+or a similar data storage engine. You could also perform that step here, in the same manner,
+or even do both at once. The goal of this application was to do a lot of work to a small set
+of documents, but to do so parallelized in a swarm. In this way, you avoid a lot of the
+overhead that a heavy analytics requirement might otherwise incur.</p>
+
+<p>Previous: <a href="/2015/09/28/vendorx-supervisor.html">Thor Ingestion Supervisor</a></p>
+
+  </article>
+
+</div>
+
+      </div>
+    </div>
+
+    <footer class="site-footer">
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading"></h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col  footer-col-1">
+        <ul class="contact-list">
+          <li></li>
+          <li><a href="mailto:"></a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-2">
+        <ul class="social-media-list">
+          
+
+          
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-3">
+        <p class="text"></p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+
+
+  </body>
+
+</html>

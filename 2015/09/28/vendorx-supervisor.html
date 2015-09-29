@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>The VendorX Ingestion Supervisor</title>
+  <meta name="description" content="As mentioned on other pages, VendorX used Datasift to push large quantities of data ontoa Redis queue running on AWS. The same machine that hosted that queue...">
+
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="canonical" href="/2015/09/28/vendorx-supervisor.html">
+  <link rel="alternate" type="application/rss+xml" title="" href="/feed.xml" />
+</head>
+
+
+  <body>
+
+    <header class="site-header">
+
+  <div class="wrapper">
+
+    <a class="site-title" href="/"></a>
+
+    <nav class="site-nav">
+      <a href="#" class="menu-icon">
+        <svg viewBox="0 0 18 15">
+          <path fill="#424242" d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.031C17.335,0,18,0.665,18,1.484L18,1.484z"/>
+          <path fill="#424242" d="M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0c0-0.82,0.665-1.484,1.484-1.484 h15.031C17.335,6.031,18,6.696,18,7.516L18,7.516z"/>
+          <path fill="#424242" d="M18,13.516C18,14.335,17.335,15,16.516,15H1.484C0.665,15,0,14.335,0,13.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.031C17.335,12.031,18,12.696,18,13.516L18,13.516z"/>
+        </svg>
+      </a>
+
+      <div class="trigger">
+        
+          
+          <a class="page-link" href="/about/">What You See Here</a>
+          
+        
+          
+        
+          
+        
+          
+        
+      </div>
+    </nav>
+
+  </div>
+
+</header>
+
+
+    <div class="page-content">
+      <div class="wrapper">
+        <div class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">The VendorX Ingestion Supervisor</h1>
+    <p class="post-meta">Sep 28, 2015</p>
+  </header>
+
+  <article class="post-content">
+    <p>As mentioned on other pages, VendorX used Datasift to push large quantities of data onto
+a Redis queue running on AWS. The same machine that hosted that queue also included a
+supervisor application, written in Ruby and based on <a href="https://github.com/kennethkalmer/daemon-kit">DaemonKit</a>.
+Its job was to keep an eye on the size of the queue over time. Based on the size of the
+queue, it had the ability to spawn multiple AWS micro instances from an AMI image, which contained
+a basic Ruby execution environment and a <a href="/2015/09/28/vendorx-processor.html">processor application</a>.</p>
+
+<p>This section of the repository includes 2 files:
+- <a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor-daemon.rb">thor-ingest-supervisor-daemon.rb</a>, the configuration and work section of the supervisor daemon
+- <a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor.rb">thor-ingest-supervisor.rb</a>, a library of useful code that supports the supervisor daemon</p>
+
+<h3 id="sample-1-measuring-desired-swarm-size">Sample 1: Measuring Desired Swarm Size</h3>
+
+<p>This is a simplistic algorithm designed to ensure that we have no fewer than 2 and no more than 7
+processor nodes running at any given time. We establish a base number of processors for various queue
+lengths, and then we examine a moving histogram of the change in the length of the queue to see if we
+need to add a bit more processing power to handle whatever sort of surge we’re in.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># This is a combination of excerpts from several files, arranged here for convenience.</span>
+
+<span class="no">DaemonKit</span><span class="o">::</span><span class="no">Application</span><span class="o">.</span><span class="n">running!</span> <span class="k">do</span> <span class="o">|</span><span class="n">config</span><span class="o">|</span>
+  <span class="c1"># Initialize an empty histogram</span>
+  <span class="vi">@histogram</span> <span class="o">=</span> <span class="o">[]</span>
+
+  <span class="c1"># quick hack to get Infinity. Infinity is a constant in Ruby, but cannot be</span>
+  <span class="c1"># referred to or instantiated or accessed in any way other than to divide 1.0 by 0.</span>
+  <span class="c1"># This, I presume, is a feature.</span>
+  <span class="no">Inf</span> <span class="o">=</span> <span class="mi">1</span><span class="o">.</span><span class="mi">0</span><span class="o">/</span><span class="mi">0</span>
+
+  <span class="vi">@ranges</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">0</span><span class="o">.</span><span class="n">.</span><span class="mi">100000</span>      <span class="o">=&gt;</span> <span class="mi">2</span><span class="p">,</span>
+    <span class="mi">100001</span><span class="o">.</span><span class="n">.</span><span class="mi">250000</span> <span class="o">=&gt;</span> <span class="mi">3</span><span class="p">,</span>
+    <span class="mi">250001</span><span class="o">.</span><span class="n">.</span><span class="mi">500000</span> <span class="o">=&gt;</span> <span class="mi">4</span><span class="p">,</span>
+    <span class="mi">500001</span><span class="o">.</span><span class="n">.</span><span class="no">Inf</span>    <span class="o">=&gt;</span> <span class="mi">5</span>
+  <span class="p">}</span>
+<span class="k">end</span>
+
+<span class="c1"># get the number of sequential intervals in which the queue has been larger or</span>
+<span class="c1"># smaller than the measurement before it. Returns a positive integer for consecutive</span>
+<span class="c1"># queue length increases, a negative integer for consecutive decreases, or zero.</span>
+<span class="k">def</span> <span class="nf">histogram_trend</span>
+  <span class="n">histo</span> <span class="o">=</span> <span class="vi">@histogram</span><span class="o">.</span><span class="n">dup</span><span class="o">.</span><span class="n">reverse</span>
+  <span class="n">last</span>  <span class="o">=</span> <span class="n">histo</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span>
+  <span class="n">trend</span> <span class="o">=</span> <span class="mi">0</span>
+  <span class="n">dir</span>   <span class="o">=</span> <span class="mi">0</span>
+  <span class="k">for</span> <span class="n">x</span> <span class="k">in</span> <span class="n">histo</span>
+    <span class="k">break</span> <span class="k">if</span> <span class="n">x</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="n">last</span>
+      <span class="k">break</span> <span class="k">if</span> <span class="n">dir</span> <span class="o">&lt;</span> <span class="mi">0</span>
+      <span class="n">trend</span> <span class="o">+=</span> <span class="mi">1</span>
+      <span class="n">dir</span> <span class="o">=</span> <span class="mi">1</span>
+      <span class="n">last</span> <span class="o">=</span> <span class="n">x</span>
+    <span class="k">elsif</span> <span class="n">x</span> <span class="o">&lt;</span> <span class="n">last</span>
+      <span class="k">break</span> <span class="k">if</span> <span class="n">dir</span> <span class="o">&gt;</span> <span class="mi">0</span>
+      <span class="n">trend</span> <span class="o">+=</span> <span class="mi">1</span>
+      <span class="n">dir</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+      <span class="n">last</span> <span class="o">=</span> <span class="n">x</span>
+    <span class="k">else</span>
+      <span class="n">trend</span><span class="o">++</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  <span class="k">return</span> <span class="n">dir</span><span class="o">*</span><span class="n">trend</span>
+<span class="k">end</span>
+
+<span class="kp">loop</span> <span class="k">do</span>
+  <span class="c1"># Get the size of the current processing queue</span>
+  <span class="n">current_qlen</span> <span class="o">=</span> <span class="vi">@queue</span><span class="o">.</span><span class="n">llen</span> <span class="vi">@app_config</span><span class="o">[</span><span class="s1">&#39;queue&#39;</span><span class="o">][</span><span class="s1">&#39;q&#39;</span><span class="o">]</span>
+
+  <span class="c1"># push this measurement onto the histogram and trim the oldest entry</span>
+  <span class="vi">@histogram</span> <span class="o">&lt;&lt;</span> <span class="n">current_qlen</span>
+  <span class="vi">@histogram</span><span class="o">.</span><span class="n">shift</span>
+
+  <span class="c1"># How many workers does this queue size call for?</span>
+  <span class="n">desired_workers</span> <span class="o">=</span> <span class="mi">0</span>
+  <span class="vi">@ranges</span><span class="o">.</span><span class="n">each</span> <span class="p">{</span><span class="o">|</span><span class="n">k</span><span class="p">,</span><span class="n">v</span><span class="o">|</span> <span class="n">desired_workers</span> <span class="o">=</span> <span class="n">v</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">include?</span> <span class="n">qlen</span><span class="p">}</span>
+
+  <span class="c1"># get the histogram trend</span>
+  <span class="c1"># the histogram trend measures data in 2-minute increments. If a trend has</span>
+  <span class="c1"># continued for 10 consecutive minutes (5 entries), add or subtract 1 from</span>
+  <span class="c1"># the desired workers. If 20 minutes, add or subtract 2.</span>
+  <span class="n">trend</span> <span class="o">=</span> <span class="n">histogram_trend</span><span class="p">()</span>
+  <span class="k">if</span> <span class="n">trend</span> <span class="o">&gt;=</span> <span class="mi">0</span>
+    <span class="n">desired_workers</span> <span class="o">+=</span> <span class="n">trend</span> <span class="o">/</span> <span class="mi">5</span>
+  <span class="k">elsif</span> <span class="n">trend</span> <span class="o">&lt;</span> <span class="mi">0</span>
+    <span class="n">desired_workers</span> <span class="o">-=</span> <span class="n">trend</span><span class="o">.</span><span class="n">abs</span> <span class="o">/</span> <span class="mi">5</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Finally, we want to have 2 workers running at all times. Don&#39;t go lower than 2.</span>
+  <span class="n">desired_workers</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="n">desired_workers</span> <span class="o">&lt;</span> <span class="mi">2</span>
+
+  <span class="c1"># there&#39;s more here, it&#39;ll be shown in Sample #2</span>
+<span class="k">end</span></code></pre></div>
+
+<h3 id="sample-2-spawning-or-reaping-processor-nodes">Sample #2: Spawning or Reaping Processor Nodes</h3>
+
+<p>In the first example, we went through steps to get a number of <em>desired workers</em>. This
+example is simpler, designed to grow or shrink the size of the processor swarm based on
+the number of desired workers we get.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="kp">loop</span> <span class="k">do</span>
+  <span class="c1"># ... all the stuff to get our desired swarm size</span>
+
+  <span class="c1"># Get our current processing swarm for this stack (without any terminated ones)</span>
+  <span class="n">instances</span> <span class="o">=</span> <span class="vi">@ec2</span><span class="o">.</span><span class="n">instances</span><span class="o">.</span><span class="n">select</span> <span class="p">{</span> <span class="o">|</span><span class="n">instance</span><span class="o">|</span>
+    <span class="n">instance</span><span class="o">.</span><span class="n">tags</span><span class="o">[</span><span class="s1">&#39;App&#39;</span><span class="o">]</span>   <span class="o">==</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;tags&#39;</span><span class="o">][</span><span class="s1">&#39;App&#39;</span><span class="o">]</span>  <span class="o">&amp;&amp;</span>
+    <span class="n">instance</span><span class="o">.</span><span class="n">tags</span><span class="o">[</span><span class="s1">&#39;Role&#39;</span><span class="o">]</span>  <span class="o">==</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;tags&#39;</span><span class="o">][</span><span class="s1">&#39;Role&#39;</span><span class="o">]</span> <span class="o">&amp;&amp;</span>
+    <span class="n">instance</span><span class="o">.</span><span class="n">tags</span><span class="o">[</span><span class="s1">&#39;Stack&#39;</span><span class="o">]</span> <span class="o">==</span> <span class="no">DaemonKit</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">capitalize</span>
+  <span class="p">}</span><span class="o">.</span><span class="n">keep_if</span> <span class="p">{</span><span class="o">|</span><span class="n">instance</span><span class="o">|</span> <span class="n">instance</span><span class="o">.</span><span class="n">status</span> <span class="o">!=</span> <span class="ss">:terminated</span><span class="p">}</span>
+
+  <span class="c1"># how many more or fewer instances do we require?</span>
+  <span class="n">delta</span> <span class="o">=</span> <span class="n">desired_workers</span> <span class="o">-</span> <span class="n">instances</span><span class="o">.</span><span class="n">size</span>
+
+  <span class="c1"># take action!</span>
+  <span class="k">if</span> <span class="n">delta</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="c1"># nothing to do here, we&#39;ve got the swarm we need, if not the swarm we deserve right now.</span>
+    <span class="c1"># I&#39;m such a dork.</span>
+  <span class="k">elsif</span> <span class="n">delta</span> <span class="o">&lt;</span> <span class="mi">0</span>
+    <span class="c1"># we need to kill some instances. Find the $delta oldest and terminate them.</span>
+    <span class="n">kill_list</span> <span class="o">=</span> <span class="n">instances</span><span class="o">.</span><span class="n">sort_by</span><span class="p">(</span><span class="o">&amp;</span><span class="ss">:launch_time</span><span class="p">)</span><span class="o">[</span><span class="mi">0</span><span class="o">.</span><span class="n">.</span><span class="p">(</span><span class="n">delta</span><span class="o">.</span><span class="n">abs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span><span class="o">]</span>
+    <span class="n">kill_list</span><span class="o">.</span><span class="n">each</span> <span class="k">do</span><span class="o">|</span><span class="n">instance</span><span class="o">|</span>
+      <span class="no">DaemonKit</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span> <span class="s2">&quot;</span><span class="se">\t</span><span class="s2"> RIP: Instance </span><span class="si">#{</span><span class="n">instance</span><span class="o">.</span><span class="n">id</span><span class="si">}</span><span class="s2"> []&quot;</span>
+      <span class="n">instance</span><span class="o">.</span><span class="n">terminate</span>
+    <span class="k">end</span>
+  <span class="k">elsif</span> <span class="n">delta</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="c1"># we need to launch some instances.</span>
+    <span class="p">(</span><span class="mi">0</span><span class="o">.</span><span class="n">.</span><span class="p">(</span><span class="n">delta</span><span class="o">.</span><span class="n">abs</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">each</span> <span class="k">do</span> <span class="o">|</span><span class="n">n</span><span class="o">|</span>
+      <span class="n">instance</span> <span class="o">=</span> <span class="vi">@ec2</span><span class="o">.</span><span class="n">instances</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+        <span class="ss">image_id</span><span class="p">:</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;ec2&#39;</span><span class="o">][</span><span class="s1">&#39;image_id&#39;</span><span class="o">]</span><span class="p">,</span>
+        <span class="ss">instance_type</span><span class="p">:</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;ec2&#39;</span><span class="o">][</span><span class="s1">&#39;instance_type&#39;</span><span class="o">]</span><span class="p">,</span>
+        <span class="ss">count</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="ss">security_groups</span><span class="p">:</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;ec2&#39;</span><span class="o">][</span><span class="s1">&#39;security_groups&#39;</span><span class="o">]</span><span class="p">,</span>
+        <span class="ss">key_pair</span><span class="p">:</span> <span class="vi">@ec2</span><span class="o">.</span><span class="n">key_pairs</span><span class="o">[</span><span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;ec2&#39;</span><span class="o">][</span><span class="s1">&#39;key_pair_id&#39;</span><span class="o">]]</span><span class="p">,</span>
+        <span class="ss">instance_initiated_shutdown_behavior</span><span class="p">:</span> <span class="s1">&#39;terminate&#39;</span><span class="p">,</span>
+        <span class="ss">user_data</span><span class="p">:</span> <span class="s1">&#39;&#39;</span>
+      <span class="p">)</span>
+      <span class="n">instance</span><span class="o">.</span><span class="n">tag</span><span class="p">(</span><span class="s1">&#39;Name&#39;</span><span class="p">,</span>  <span class="ss">value</span><span class="p">:</span> <span class="s2">&quot;thor-integration-qproc-</span><span class="si">#{</span><span class="n">instances</span><span class="o">.</span><span class="n">size</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">n</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+      <span class="n">instance</span><span class="o">.</span><span class="n">tag</span><span class="p">(</span><span class="s1">&#39;App&#39;</span><span class="p">,</span>   <span class="ss">value</span><span class="p">:</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;tags&#39;</span><span class="o">][</span><span class="s1">&#39;App&#39;</span><span class="o">]</span><span class="p">)</span>
+      <span class="n">instance</span><span class="o">.</span><span class="n">tag</span><span class="p">(</span><span class="s1">&#39;Role&#39;</span><span class="p">,</span>  <span class="ss">value</span><span class="p">:</span> <span class="vi">@aws_config</span><span class="o">[</span><span class="s1">&#39;tags&#39;</span><span class="o">][</span><span class="s1">&#39;Role&#39;</span><span class="o">]</span><span class="p">)</span>
+      <span class="n">instance</span><span class="o">.</span><span class="n">tag</span><span class="p">(</span><span class="s1">&#39;Stack&#39;</span><span class="p">,</span> <span class="ss">value</span><span class="p">:</span> <span class="no">DaemonKit</span><span class="o">.</span><span class="n">env</span><span class="o">.</span><span class="n">capitalize</span><span class="p">)</span>
+
+      <span class="no">DaemonKit</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">info</span> <span class="s2">&quot;</span><span class="se">\t</span><span class="s2"> Spawned: Instance </span><span class="si">#{</span><span class="n">instance</span><span class="o">.</span><span class="n">id</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  <span class="c1"># sleep now. Wake in 2 minutes to check our status again.</span>
+  <span class="nb">sleep</span> <span class="mi">120</span>
+<span class="k">end</span></code></pre></div>
+
+<p>Previous: <a href="/2015/09/28/vendorx-supervisor.html">Thor Ingestion Supervisor</a></p>
+
+<p>Next: <a href="/2015/09/28/vendorx-processor.html">Thor Ingestion Processor</a></p>
+
+  </article>
+
+</div>
+
+      </div>
+    </div>
+
+    <footer class="site-footer">
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading"></h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col  footer-col-1">
+        <ul class="contact-list">
+          <li></li>
+          <li><a href="mailto:"></a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-2">
+        <ul class="social-media-list">
+          
+
+          
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-3">
+        <p class="text"></p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+
+
+  </body>
+
+</html>

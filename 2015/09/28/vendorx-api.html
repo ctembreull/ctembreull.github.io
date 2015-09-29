@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>The VendorX API</title>
+  <meta name="description" content="Moving to a single-page Angular application also necessitated moving away from the standard Railsapplication that VendorX had been using. Ruby was, however, ...">
+
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="canonical" href="/2015/09/28/vendorx-api.html">
+  <link rel="alternate" type="application/rss+xml" title="" href="/feed.xml" />
+</head>
+
+
+  <body>
+
+    <header class="site-header">
+
+  <div class="wrapper">
+
+    <a class="site-title" href="/"></a>
+
+    <nav class="site-nav">
+      <a href="#" class="menu-icon">
+        <svg viewBox="0 0 18 15">
+          <path fill="#424242" d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.031C17.335,0,18,0.665,18,1.484L18,1.484z"/>
+          <path fill="#424242" d="M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0c0-0.82,0.665-1.484,1.484-1.484 h15.031C17.335,6.031,18,6.696,18,7.516L18,7.516z"/>
+          <path fill="#424242" d="M18,13.516C18,14.335,17.335,15,16.516,15H1.484C0.665,15,0,14.335,0,13.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.031C17.335,12.031,18,12.696,18,13.516L18,13.516z"/>
+        </svg>
+      </a>
+
+      <div class="trigger">
+        
+          
+          <a class="page-link" href="/about/">What You See Here</a>
+          
+        
+          
+        
+          
+        
+          
+        
+      </div>
+    </nav>
+
+  </div>
+
+</header>
+
+
+    <div class="page-content">
+      <div class="wrapper">
+        <div class="post">
+
+  <header class="post-header">
+    <h1 class="post-title">The VendorX API</h1>
+    <p class="post-meta">Sep 28, 2015</p>
+  </header>
+
+  <article class="post-content">
+    <p>Moving to a single-page Angular application also necessitated moving away from the standard Rails
+application that VendorX had been using. Ruby was, however, working very well for us as a development
+language, so we instead built a backing API using <a href="http://intridea.github.io/grape">Grape</a>, a Rack-based
+API framework. We also needed to move away from MySQL for the sake of speed. Our datastore was becoming
+large and unmanageable with any sort of relational system, so we migrated our data to
+<a href="http://elastic.co">Elasticsearch</a> and (somewhat later) <a href="http://neo4j.com">Neo4j</a>.</p>
+
+<p>This section of the repository includes 4 files:</p>
+
+<ul>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-api/metric.rb">metric.rb</a>, a virtual model class to pull data from Elasticsearch and return it as
+JSON to the front end</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-api/esquire.rb">esquire.rb</a>, a useful means of constructing the set of Elasticsearch queries we used</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-api/definition.rb">definition.rb</a>, another virtual model class to control and update Datasift</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-api/csdl_helpers.rb">csdl_helpers.rb</a>, a utility to convert definitions into Datasift CSDL.</li>
+</ul>
+
+<h3 id="sample-1-generating-queries">Sample 1: Generating Queries</h3>
+
+<p>Thor presented data by means of aggregated Elasticsearch queries. We used several pre-defined axes of
+analysis: Top Authors (by Volume, by Mention, by Top Hashtags, by Mentions by Top Authors) and Top Hashtags
+(by Volume, by Top Authors). All of these queries were filterable by date range, and could exclude unwanted
+data. To facilitate all of this, I created a query library called Esquire, and a virtual “Model” class
+for metrics:</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># This is an excerpt from models/metric.rb</span>
+<span class="k">module</span> <span class="nn">Metric</span>
+  <span class="k">class</span> <span class="nc">TopAuthors</span>
+    <span class="k">def</span> <span class="nf">by_volume</span><span class="p">(</span><span class="n">opts</span><span class="o">=</span><span class="p">{})</span>
+      <span class="n">opts</span><span class="o">.</span><span class="n">to_options!</span> <span class="c1"># to_options! turned String hash keys into Symbols</span>
+
+      <span class="c1"># Top Authors By Volume searched the data and returned a list of the top n</span>
+      <span class="c1"># authors, ordered by the number of results found for each.</span>
+      <span class="n">q</span> <span class="o">=</span> <span class="no">Esquire</span><span class="o">.</span><span class="n">new</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">opts</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">source_filter</span><span class="p">(</span><span class="vi">@project</span><span class="p">,</span> <span class="vi">@track</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">date_filter</span><span class="p">(</span><span class="n">opts</span><span class="o">[</span><span class="ss">:start_date</span><span class="o">]</span><span class="p">,</span> <span class="n">opts</span><span class="o">[</span><span class="ss">:end_date</span><span class="o">]</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">aggregations</span><span class="o">[</span><span class="ss">:top_authors</span><span class="o">]</span> <span class="o">=</span> <span class="p">{</span><span class="ss">terms</span><span class="p">:</span> <span class="p">{</span><span class="ss">field</span><span class="p">:</span> <span class="s1">&#39;interaction.author.username&#39;</span><span class="p">,</span> <span class="ss">size</span><span class="p">:</span> <span class="mi">50</span><span class="p">}}</span>
+
+      <span class="c1"># MeasuredQuery was a basic query that included instrumentation to give us an idea how</span>
+      <span class="c1"># quickly our queries were running. Since they were usually pretty fast, this was mostly</span>
+      <span class="c1"># to alert us to someone sending in very, very large date ranges, or a problem with the</span>
+      <span class="c1"># infrastructure that needed addressing.</span>
+      <span class="n">result</span> <span class="o">=</span> <span class="nb">self</span><span class="o">.</span><span class="n">MeasuredQuery</span><span class="p">(</span><span class="n">q</span><span class="o">.</span><span class="n">build</span><span class="p">,</span> <span class="s2">&quot;authors.</span><span class="si">#{</span><span class="n">__method__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span>
+      <span class="k">unless</span> <span class="n">result</span><span class="o">.</span><span class="n">nil?</span> <span class="o">||</span> <span class="n">result</span><span class="o">.</span><span class="n">empty?</span>
+        <span class="n">list</span> <span class="o">=</span> <span class="n">result</span><span class="o">[</span><span class="s1">&#39;aggregations&#39;</span><span class="o">][</span><span class="s1">&#39;top_authors&#39;</span><span class="o">][</span><span class="s1">&#39;buckets&#39;</span><span class="o">]</span>
+        <span class="n">list</span> <span class="o">=</span> <span class="nb">self</span><span class="o">.</span><span class="n">normalize_keys</span><span class="p">(</span><span class="n">list</span><span class="p">,</span> <span class="o">[</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="s1">&#39;doc_count&#39;</span><span class="o">]</span><span class="p">,</span> <span class="o">[</span><span class="s1">&#39;screen_name&#39;</span><span class="p">,</span> <span class="s1">&#39;count&#39;</span><span class="o">]</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">list</span>
+      <span class="k">end</span>
+    <span class="k">end</span> <span class="c1"># end #by_volume</span>
+  <span class="k">end</span> <span class="c1"># end ::TopAuthors</span>
+
+  <span class="k">class</span> <span class="nc">TopHashtags</span>
+    <span class="k">def</span> <span class="nf">by_top_authors</span><span class="p">(</span><span class="n">opts</span><span class="o">=</span><span class="p">{})</span>
+      <span class="n">opts</span><span class="o">.</span><span class="n">to_options!</span>
+
+      <span class="c1"># For Top Hashtags By Top Authors, we actually had to first perform a Top Authors By Volume</span>
+      <span class="c1"># query, then use that to extract the screen names of those top authors, and pass them to</span>
+      <span class="c1"># the Top Hashtags query as a filter.</span>
+      <span class="n">author_search</span> <span class="o">=</span> <span class="no">Metric</span><span class="o">::</span><span class="no">TopAuthors</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="vi">@project</span><span class="p">,</span> <span class="vi">@track</span><span class="p">)</span>
+      <span class="c1"># From that query, we bundle up all the author names as an array of strings.</span>
+      <span class="n">top_authors</span>   <span class="o">=</span> <span class="n">author_search</span><span class="o">.</span><span class="n">by_volume</span><span class="p">(</span><span class="n">opts</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">{</span><span class="o">|</span><span class="n">bucket</span><span class="o">|</span> <span class="n">bucket</span><span class="o">[</span><span class="s1">&#39;screen_name&#39;</span><span class="o">]</span><span class="p">}</span>
+
+      <span class="n">q</span> <span class="o">=</span> <span class="no">Esquire</span><span class="o">.</span><span class="n">new</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="n">opts</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">source_filter</span><span class="p">(</span><span class="vi">@project</span><span class="p">,</span> <span class="vi">@track</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">date_filter</span><span class="p">(</span><span class="n">opts</span><span class="o">[</span><span class="ss">:start_date</span><span class="o">]</span><span class="p">,</span> <span class="n">opts</span><span class="o">[</span><span class="ss">:end_date</span><span class="o">]</span><span class="p">)</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">qfilters</span> <span class="o">&lt;&lt;</span> <span class="p">{</span><span class="ss">exists</span><span class="p">:</span> <span class="p">{</span><span class="ss">field</span><span class="p">:</span> <span class="s1">&#39;interaction.hashtags&#39;</span><span class="p">}}</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">qfilters</span> <span class="o">&lt;&lt;</span> <span class="p">{</span><span class="ss">terms</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;interaction.author.username&#39;</span> <span class="o">=&gt;</span> <span class="n">top_authors</span><span class="p">}}</span> <span class="c1"># here&#39;s where we used the Top Authors</span>
+      <span class="n">q</span><span class="o">.</span><span class="n">facets</span><span class="o">[</span><span class="ss">:top_hashtags</span><span class="o">]</span> <span class="o">=</span> <span class="p">{</span><span class="ss">terms</span><span class="p">:</span> <span class="p">{</span><span class="ss">field</span><span class="p">:</span> <span class="s1">&#39;interaction.hashtags&#39;</span><span class="p">,</span> <span class="ss">size</span><span class="p">:</span> <span class="mi">50</span><span class="p">,</span> <span class="ss">shard_size</span><span class="p">:</span> <span class="mi">50</span><span class="p">}}</span>
+
+      <span class="n">result</span> <span class="o">=</span> <span class="nb">self</span><span class="o">.</span><span class="n">MeasuredQuery</span><span class="p">(</span><span class="n">q</span><span class="o">.</span><span class="n">build</span><span class="p">,</span> <span class="s2">&quot;hashtags.</span><span class="si">#{</span><span class="n">__method__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">opts</span><span class="p">)</span>
+      <span class="k">unless</span> <span class="n">result</span><span class="o">.</span><span class="n">nil?</span> <span class="o">||</span> <span class="n">result</span><span class="o">.</span><span class="n">empty?</span>
+        <span class="n">list</span> <span class="o">=</span> <span class="n">result</span><span class="o">[</span><span class="s1">&#39;facets&#39;</span><span class="o">][</span><span class="s1">&#39;top_hashtags&#39;</span><span class="o">][</span><span class="s1">&#39;terms&#39;</span><span class="o">]</span>
+        <span class="n">list</span> <span class="o">=</span> <span class="nb">self</span><span class="o">.</span><span class="n">normalize_keys</span><span class="p">(</span><span class="n">list</span><span class="p">,</span> <span class="o">[</span><span class="s1">&#39;term&#39;</span><span class="o">]</span><span class="p">,</span> <span class="o">[</span><span class="s1">&#39;hashtag&#39;</span><span class="o">]</span><span class="p">)</span>
+        <span class="n">list</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+  <span class="k">end</span></code></pre></div>
+
+<h3 id="sample-2-controlling-data-intake">Sample 2: Controlling Data Intake</h3>
+
+<p>Our source for all of this data was Datasift, which at the time was a Twitter firehose partner.
+From time to time, our customers would need to change the data that we were ingesting - to add or
+remove tracked keywords, hashtags, or authors. Datasift provided a public API to do all of these
+things, but we didn’t want to add that functionality directly into the frontend client app. So, we
+added a control surface to the API to manage and shape the data stream.</p>
+
+<div class="highlight"><pre><code class="language-ruby" data-lang="ruby"><span class="c1"># There was one Definition per customer, which combined all of the seperate projects and topics into</span>
+<span class="c1"># a single structure. This model object kept a copy of the most recent CSDL (Customer Service</span>
+<span class="c1"># Definition Language) statement used to configure the data stream, and also a copy of the hash ID</span>
+<span class="c1"># of the job that was running in Datasift.</span>
+<span class="k">class</span> <span class="nc">Definition</span>
+  <span class="c1"># excerpt from definition.rb</span>
+  <span class="kp">include</span> <span class="no">Mongoid</span><span class="o">::</span><span class="no">Document</span>
+  <span class="kp">include</span> <span class="no">Mongoid</span><span class="o">::</span><span class="no">Timestamps</span>
+
+  <span class="n">field</span> <span class="ss">:csdl</span><span class="p">,</span>            <span class="ss">type</span><span class="p">:</span> <span class="nb">String</span><span class="p">,</span>  <span class="ss">default</span><span class="p">:</span> <span class="s1">&#39;&#39;</span>
+  <span class="n">field</span> <span class="ss">:last_updated_at</span><span class="p">,</span> <span class="ss">type</span><span class="p">:</span> <span class="no">DateTime</span>
+  <span class="n">field</span> <span class="ss">:datasift_hash</span><span class="p">,</span>   <span class="ss">type</span><span class="p">:</span> <span class="nb">String</span><span class="p">,</span>  <span class="ss">default</span><span class="p">:</span> <span class="s1">&#39;&#39;</span>
+  <span class="n">field</span> <span class="ss">:subscription_id</span><span class="p">,</span> <span class="ss">type</span><span class="p">:</span> <span class="nb">String</span><span class="p">,</span>  <span class="ss">default</span><span class="p">:</span> <span class="s1">&#39;&#39;</span>
+  <span class="n">field</span> <span class="ss">:valid</span><span class="p">,</span>           <span class="ss">type</span><span class="p">:</span> <span class="no">Boolean</span><span class="p">,</span> <span class="ss">default</span><span class="p">:</span> <span class="kp">false</span>
+
+  <span class="c1"># A lifecycle hook; anytime we called for a Definition object, we wanted to create</span>
+  <span class="c1"># a fresh connection to the Datasift system.</span>
+  <span class="n">after_find</span> <span class="ss">:network_setup</span>
+
+  <span class="k">def</span> <span class="nf">network_setup</span>
+    <span class="n">datasift_config</span>  <span class="o">=</span> <span class="no">YAML</span><span class="o">.</span><span class="n">load_file</span><span class="p">(</span><span class="no">File</span><span class="o">.</span><span class="n">expand_path</span><span class="p">(</span><span class="s1">&#39;../../../config/&#39;</span><span class="p">,</span> <span class="bp">__FILE__</span><span class="p">)</span> <span class="o">+</span> <span class="s1">&#39;/datasift.yml&#39;</span><span class="p">)</span>
+    <span class="vi">@datasift_client</span> <span class="o">=</span> <span class="no">DataSift</span><span class="o">::</span><span class="no">User</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">datasift_config</span><span class="o">[</span><span class="s1">&#39;username&#39;</span><span class="o">]</span><span class="p">,</span> <span class="n">datasift_config</span><span class="o">[</span><span class="s1">&#39;api_key&#39;</span><span class="o">]</span><span class="p">,</span> <span class="kp">false</span><span class="p">)</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Rebuild the CSDL definition from the Project and Topic objects</span>
+  <span class="c1"># this gathered all of the keywords, hashtags, and authors from the various</span>
+  <span class="c1"># topics in the project and converted them into a CSDL statement.</span>
+  <span class="k">def</span> <span class="nf">refresh</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="kp">false</span><span class="p">)</span>    
+    <span class="n">projects</span>      <span class="o">=</span> <span class="no">Project</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="ss">active</span><span class="p">:</span> <span class="kp">true</span><span class="p">)</span>
+    <span class="n">new_timestamp</span> <span class="o">=</span> <span class="n">projects</span><span class="o">.</span><span class="n">max_by</span><span class="p">(</span><span class="o">&amp;</span><span class="ss">:terms_updated_at</span><span class="p">)</span><span class="o">.</span><span class="n">terms_updated_at</span><span class="o">.</span><span class="n">utc</span><span class="o">.</span><span class="n">to_i</span>
+    <span class="k">if</span> <span class="n">force</span> <span class="o">==</span> <span class="kp">true</span> <span class="o">||</span> <span class="n">new_timestamp</span> <span class="o">&gt;</span> <span class="n">last_updated_at</span><span class="o">.</span><span class="n">utc</span><span class="o">.</span><span class="n">to_i</span>
+      <span class="c1"># CSDLHelper was a useful, but not very interesting, library to turn the data</span>
+      <span class="c1"># in Project and Topic objects into Datasift&#39;s stream-curation language. It</span>
+      <span class="c1"># will be included in the repository because it was an interesting challenge</span>
+      <span class="c1"># in marshalling a whole bunch of stuff into a very specific shape.</span>
+      <span class="n">csdl</span>       <span class="o">=</span> <span class="no">Thor</span><span class="o">::</span><span class="no">CSDLHelpers</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">projects</span><span class="p">)</span><span class="o">.</span><span class="n">gsub</span><span class="p">(</span><span class="sr">/\&quot;\&quot;/</span><span class="p">,</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span>
+      <span class="n">update_attributes!</span><span class="p">(</span><span class="ss">last_updated_at</span><span class="p">:</span> <span class="n">new_timestamp</span><span class="p">,</span> <span class="ss">csdl</span><span class="p">:</span> <span class="n">csdl</span><span class="p">)</span>
+
+      <span class="n">definition</span> <span class="o">=</span> <span class="vi">@datasift_client</span><span class="o">.</span><span class="n">createDefinition</span><span class="p">(</span><span class="n">csdl</span><span class="p">)</span>
+      <span class="k">if</span> <span class="n">definition</span><span class="o">.</span><span class="n">validate</span>
+        <span class="n">update_attributes!</span><span class="p">(</span><span class="ss">datasift_hash</span><span class="p">:</span> <span class="n">definition</span><span class="o">.</span><span class="n">hash</span><span class="p">,</span> <span class="ss">valid</span><span class="p">:</span> <span class="kp">true</span><span class="p">)</span>
+      <span class="k">else</span>
+        <span class="n">update_attributes!</span><span class="p">(</span><span class="ss">datasift_hash</span><span class="p">:</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="ss">valid</span><span class="p">:</span> <span class="kp">false</span><span class="p">)</span>
+      <span class="k">end</span>
+
+      <span class="k">return</span> <span class="kp">true</span>
+    <span class="k">end</span>
+    <span class="kp">false</span>
+  <span class="k">end</span>
+
+  <span class="c1"># This would rebuild the CSDL via #refresh, and then send it off to Datasift</span>
+  <span class="c1"># as a Push Definition, which instructed Datasift to dump its data onto the</span>
+  <span class="c1"># right side of a Redis queue.</span>
+  <span class="k">def</span> <span class="nf">start_collection</span><span class="p">(</span><span class="n">force_refresh</span><span class="o">=</span><span class="kp">false</span><span class="p">)</span>
+    <span class="n">updated</span> <span class="o">=</span> <span class="n">refresh</span><span class="p">(</span><span class="n">force_refresh</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">updated</span> <span class="o">||</span> <span class="n">subscription_id</span><span class="o">.</span><span class="n">empty?</span>
+
+      <span class="k">unless</span> <span class="n">subscription_id</span><span class="o">.</span><span class="n">empty?</span>
+        <span class="n">stop_collection</span>
+      <span class="k">end</span>
+
+      <span class="c1"># create new stream</span>
+      <span class="n">pushdef</span> <span class="o">=</span> <span class="vi">@datasift_client</span><span class="o">.</span><span class="n">createPushDefinition</span><span class="p">()</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_type</span>               <span class="o">=</span> <span class="s1">&#39;redis&#39;</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_params</span><span class="o">[</span><span class="s1">&#39;host&#39;</span><span class="o">]</span>     <span class="o">=</span> <span class="vi">@redis_config</span><span class="o">[</span><span class="s1">&#39;public_host&#39;</span><span class="o">]</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_params</span><span class="o">[</span><span class="s1">&#39;port&#39;</span><span class="o">]</span>     <span class="o">=</span> <span class="vi">@redis_config</span><span class="o">[</span><span class="s1">&#39;port&#39;</span><span class="o">]</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_params</span><span class="o">[</span><span class="s1">&#39;database&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="vi">@redis_config</span><span class="o">[</span><span class="s1">&#39;db&#39;</span><span class="o">]</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_params</span><span class="o">[</span><span class="s1">&#39;list&#39;</span><span class="o">]</span>     <span class="o">=</span> <span class="vi">@redis_config</span><span class="o">[</span><span class="s1">&#39;queue&#39;</span><span class="o">]</span>
+      <span class="n">pushdef</span><span class="o">.</span><span class="n">output_params</span><span class="o">[</span><span class="s1">&#39;format&#39;</span><span class="o">]</span>   <span class="o">=</span> <span class="s1">&#39;json_interaction&#39;</span>
+
+      <span class="n">subscr</span>  <span class="o">=</span> <span class="n">pushdef</span><span class="o">.</span><span class="n">subscribeStreamHash</span><span class="p">(</span><span class="n">datasift_hash</span><span class="p">,</span> <span class="s2">&quot;redis.outpost.</span><span class="si">#{</span><span class="no">ENV</span><span class="o">[</span><span class="s1">&#39;RACK_ENV&#39;</span><span class="o">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+      <span class="n">update_attributes!</span><span class="p">(</span><span class="ss">subscription_id</span><span class="p">:</span> <span class="n">subscr</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span></code></pre></div>
+
+<p><strong>Note</strong>: The CSDLHelper file is <a href="http://wherever">here</a> for completeness; it’s not as interesting
+code-wise, but it was a challenge to build.</p>
+
+<p>Previous: <a href="/2015/09/28/vendorx-thor.html">Thor Overview</a></p>
+
+<p>Next: <a href="/2015/09/28/vendorx-supervisor.html">Thor Ingestion Supervisor</a></p>
+
+  </article>
+
+</div>
+
+      </div>
+    </div>
+
+    <footer class="site-footer">
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading"></h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col  footer-col-1">
+        <ul class="contact-list">
+          <li></li>
+          <li><a href="mailto:"></a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-2">
+        <ul class="social-media-list">
+          
+
+          
+        </ul>
+      </div>
+
+      <div class="footer-col  footer-col-3">
+        <p class="text"></p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+
+
+  </body>
+
+</html>
