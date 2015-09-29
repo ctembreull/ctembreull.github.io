@@ -69,9 +69,12 @@ Its job was to keep an eye on the size of the queue over time. Based on the size
 queue, it had the ability to spawn multiple AWS micro instances from an AMI image, which contained
 a basic Ruby execution environment and a <a href="/2015/09/28/vendorx-processor.html">processor application</a>.</p>
 
-<p>This section of the repository includes 2 files:
-- <a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor-daemon.rb">thor-ingest-supervisor-daemon.rb</a>, the configuration and work section of the supervisor daemon
-- <a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor.rb">thor-ingest-supervisor.rb</a>, a library of useful code that supports the supervisor daemon</p>
+<p>This section of the repository includes 2 files:</p>
+
+<ul>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor-daemon.rb">thor-ingest-supervisor-daemon.rb</a>, the configuration and work section of the supervisor daemon</li>
+  <li><a href="https://github.com/ctembreull/holocron/blob/master/thor-ingest-supervisor/thor-ingest-supervisor.rb">thor-ingest-supervisor.rb</a>, a library of useful code that supports the supervisor daemon</li>
+</ul>
 
 <h3 id="sample-1-measuring-desired-swarm-size">Sample 1: Measuring Desired Swarm Size</h3>
 
