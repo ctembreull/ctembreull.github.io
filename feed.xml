@@ -6,8 +6,8 @@
 </description>
     <link>http://ctembreull.github.io/</link>
     <atom:link href="http://ctembreull.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Tue, 29 Sep 2015 12:45:39 -0700</pubDate>
-    <lastBuildDate>Tue, 29 Sep 2015 12:45:39 -0700</lastBuildDate>
+    <pubDate>Tue, 29 Sep 2015 19:28:28 -0700</pubDate>
+    <lastBuildDate>Tue, 29 Sep 2015 19:28:28 -0700</lastBuildDate>
     <generator>Jekyll v2.5.3</generator>
     
       <item>
@@ -396,7 +396,7 @@ written with DaemonKit.&lt;/p&gt;
   &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/thor-ingest-processor-daemon.rb&quot;&gt;thor-ingest-processor-daemon.rb&lt;/a&gt;, the working section of the ingestion processor&lt;/li&gt;
   &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/thor-ingest-processor.rb&quot;&gt;thor-ingest-processor.rb&lt;/a&gt;, the (rather expansive) configuration section for the processor daemon&lt;/li&gt;
   &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/elasticsearch.rb&quot;&gt;elasticsearch.rb&lt;/a&gt;, a module for indexing documents in Elasticsearch&lt;/li&gt;
-  &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/round-geopoints.rb&quot;&gt;round-geopoints.rb&lt;/a&gt;, a processor module which
+  &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/round_geopoints.rb&quot;&gt;round_geopoints.rb&lt;/a&gt;, a processor module which
 parsed documents, found any examples of geotagging, and rounded them down to 5 digits.&lt;/li&gt;
   &lt;li&gt;&lt;a href=&quot;https://github.com/ctembreull/holocron/blob/master/thor-ingest-processor/datasift.rb&quot;&gt;datasift.rb&lt;/a&gt;, a module for parsing a document from datasift and allowing easy traversal of the complex JSON format.&lt;/li&gt;
 &lt;/ul&gt;
